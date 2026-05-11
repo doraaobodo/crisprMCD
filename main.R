@@ -1111,7 +1111,6 @@ save_analysis_outputs <- function(final_input,
                                   file_name = "mcd_analysis_results.xlsx",
                                   alpha = 0.05,
                                   top_n = 25,
-                                  include_group_sheets = FALSE,
                                   overwrite = TRUE) {
  
   out_file <- file.path(out_dir, file_name)
@@ -1127,7 +1126,9 @@ save_analysis_outputs <- function(final_input,
   
   mcd_tbl <- res$mcd_combined_results
   cw_mcd_tbl <- res$cw_mcd_combined_results
-  
+  cw_gene <- lapply(res$cw_mcd_results_by_group, `[[`, 2)
+  cw_gene = do.call(rbind, cw_gene)
+  rownames(cw_gene) = NULL
   #-----------------------------
   # Build summary sheet
   #-----------------------------
@@ -1170,6 +1171,7 @@ save_analysis_outputs <- function(final_input,
   #-----------------------------
   # Convert matrices to data frames for writing
   #-----------------------------
+
   score_df <- NULL
   if (!is.null(score_matrix)) {
     score_df <- data.frame(
@@ -1186,7 +1188,25 @@ save_analysis_outputs <- function(final_input,
   # Add plotting tables (functions defined in run_mcd.R)
   #-----------------------------
   
-  outlier_summary_tbl <- build_outlier_summary_table(res, alpha = 0.05, top_n = 25)
+  outlier_summary_tbl <- build_outlier_summary_table(res, alpha = 0.05, top_n = 100)
+  outlier_summary_tbl = merge(outlier_summary_tbl, cw_gene, by=c('group_id', 'gene'))
+  #-----------------------------
+  # Add DBSCAN Clusters
+  #-----------------------------
+  
+  db_res <- run_outlier_hdbscan(
+    outlier_summary_tbl = outlier_summary_tbl,
+    contrast_cols = score_cols,
+    alpha = 0.05,
+    minPts = 10
+  )
+  
+  
+  cw_mcd_tbl = merge(cw_mcd_tbl, 
+                     db_res[, setdiff(colnames(db_res), score_cols)], 
+                     by = c('gene', 'group_id'))
+  
+
   
   #-----------------------------
   # Create results dictionary
@@ -1196,17 +1216,26 @@ save_analysis_outputs <- function(final_input,
     sheet_name = "mcd_summary",
     column_name = setdiff(colnames(outlier_summary_tbl), score_cols),
     description = c(
+      "Group Id as defined in input sheet. Analysis was run separately per group id",
       "Gene symbol.",
       "Mahalanobis distance summarizing multivariate deviation from center across contrasts within the group. \n Larger distance indicate more extreme outliers.",
       "Rank of the Mahalanobis distance within the group. Smaller ranks indicating more extreme outliers.",
       "P-value associated with the Mahalanobis distance.",
       "Logical indicator of whether the gene was flagged as an outlier in the group.",
-      "Dominant sign amongst contrasts. Computed as (# positive contrasts / N) - (# negative contrasts / N).",
+      # "Standard deviation of absolute contrast effects. Smaller values indicate small variation among contrasts",
+      # "Interpretation of effect_indication: 'Specific' if effect_indication > 0.5, otherwise 'Global.'",
+      "Number of samples flagged as extreme in the cell-wise analysis.",
+      "Proportion of samples flagged as extreme in the cell-wise analysis",
+      "Global score = proportion flagged * mean of the absolute Z residual of flagged samples. Global score is is high when many samples are flagged and flagged samples are extreme",
+      "Local score = 1-proportion flagged * maximum absolute Z residual. Local Score is high when only a few samples are flagged but at least one is very extreme",
+      "P_global = global_score/ (global_score + local_score). P_global is evidence leaning toward widespread outlyingness.",
+      "Pattern classifies genes based on p_global. Pattern is global if the the proportion of global to local scores >0.6, meaning that samples indicate a more global pattern of effects within flagged cells.",
+      "Dominant effect sign (positive or negative) amongst contrasts. Computed as (# positive contrasts / N) - (# negative contrasts / N).",
       "Interpretation of dominant_sign: Positive if sign_col > 0.5, Negative if sign_col < -0.5, otherwise Mixed.",
-      "Standard deviation of absolute contrast effects. Smaller values indicate small variation among contrasts",
-      "Interpretation of effect_indication: 'Specific' if effect_indication > 0.5, otherwise 'Global.'",
-      "Group identifier used for mcd outlier analysis.",
-      "Grouping variable names."
+      "Dominant effect sign (positive or negative) amongst contrasts. Computed as (# positive contrasts / N) - (# negative contrasts / N).",
+      "Interpretation of dominant_sign: Positive if sign_col > 0.5, Negative if sign_col < -0.5, otherwise Mixed.",
+      NA,NA,NA,NA,NA, NA,NA,NA, NA
+      
     ),
     stringsAsFactors = FALSE
   )
@@ -1228,97 +1257,58 @@ save_analysis_outputs <- function(final_input,
   wb <- openxlsx::createWorkbook()
   
   #-----------------------------
-  # Add DBSCAN Clusters
-  #-----------------------------
-
-  db_res <- run_outlier_hdbscan(
-    outlier_summary_tbl = outlier_summary_tbl,
-    contrast_cols = score_cols,
-    alpha = 0.05,
-    minPts = 10
-  )
-  
-  #-----------------------------
   # Save plotting outputs
   #-----------------------------
   
-  # Add dictionary FIRST
-  add_sheet_with_data(wb, "results_dictionary", results_dictionary)
   
-  if (!is.null(outlier_summary_tbl)) {
-    add_score_sheet_with_data(wb, "mcd_summary", outlier_summary_tbl, score_cols)
-  }
-  
-  if (!is.null(cluster_tbl)) {
-    add_score_sheet_with_data(wb, "dbscan_clusters", db_res, score_cols)  
-  }
-  
-  #-----------------------------
-  # Raw Outputs
-  #-----------------------------
-
   if (!is.null(import_sheet)) {
     add_sheet_with_data(wb, "import_sheet", as.data.frame(import_sheet, stringsAsFactors = FALSE))
   }
   
-  if (!is.null(score_df)) {
-    add_sheet_with_data(wb, "score_matrix", score_df)
-  }
+  # 
+  # if (!is.null(outlier_summary_tbl)) {
+  #   add_score_sheet_with_data(wb, "mcd_summary", outlier_summary_tbl, score_cols)
+  # }
   
-  if (!is.null(mcd_tbl)) {
-    add_sheet_with_data(wb, "mcd_results", as.data.frame(mcd_tbl, stringsAsFactors = FALSE))
-  }
+
+  #-----------------------------
+  # Raw Outputs
+  #-----------------------------
+  # if (!is.null(score_df)) {
+  #   add_sheet_with_data(wb, "score_matrix", score_df)
+  # }
+  
+  # if (!is.null(mcd_tbl)) {
+  #   add_sheet_with_data(wb, "mcd_results", as.data.frame(mcd_tbl, stringsAsFactors = FALSE))
+  # }
 
   if (!is.null(cw_mcd_tbl)) {
-    add_sheet_with_data(wb, "cw_mcd_results", as.data.frame(cw_mcd_tbl, stringsAsFactors = FALSE))
+    add_score_sheet_with_data(wb, "main_summary", as.data.frame(cw_mcd_tbl, stringsAsFactors = FALSE),
+                              c('X', 'Zres'))
   }
-  
-  #-----------------------------
-  # Optional per-group sheets
-  #-----------------------------
-  if (isTRUE(include_group_sheets)) {
-    if (!is.null(res$mcd_results_by_group)) {
-      for (nm in names(res$mcd_results_by_group)) {
-        sheet_nm <- substr(
-          paste0("mcd_", gsub("[^A-Za-z0-9_]", "_", nm)),
-          1, 31
-        )
-        add_sheet_with_data(
-          wb,
-          sheet_nm,
-          as.data.frame(res$mcd_results_by_group[[nm]], stringsAsFactors = FALSE)
-        )
-      }
-    }
-    
-    if (!is.null(res$cw_mcd_results_by_group)) {
-      for (nm in names(res$cw_mcd_results_by_group)) {
-        cw_obj <- res$cw_mcd_results_by_group[[nm]]
-        
-        if (is.list(cw_obj) && length(cw_obj) >= 1 && is.data.frame(cw_obj[[1]])) {
-          sheet_nm <- substr(
-            paste0("cw_", gsub("[^A-Za-z0-9_]", "_", nm)),
-            1, 31
-          )
-          add_sheet_with_data(
-            wb,
-            sheet_nm,
-            as.data.frame(cw_obj[[1]], stringsAsFactors = FALSE)
-          )
-        }
-      }
-    }
+
+  if (!is.null(db_res)) {
+    add_score_sheet_with_data(wb, "mcd_summary", db_res, score_cols)  
   }
   
   #-----------------------------
   # Save workbook
   #-----------------------------
   
+  
+  
+  # Add dictionary FIRST
+  add_sheet_with_data(wb, "results_dictionary", results_dictionary)
+  
   add_sheet_with_data(wb, "run_summary", summary_df)
   
   openxlsx::saveWorkbook(wb, out_file, overwrite = overwrite)
   
   invisible(out_file)
+  
+  list('out_file'    = out_file, 
+        'gene_summary' = db_res,
+       'main_summary' = cw_mcd_tbl)
 }
 
 ###############################################################################
@@ -1333,7 +1323,7 @@ main = function() {
   check_required_packages(c("tools", "utils", "robustbase", 
                             "cellWise", "fdrtool", "openxlsx",
                             "ggplot2", "pheatmap", # "ComlpexHeatmap",
-                            "uwot", "Rtsne", "dbscan", "rmarkdown"))
+                            "dbscan", "rmarkdown", "dplyr"))
   library(tools)
   library(utils)
   library(robustbase)
@@ -1344,8 +1334,8 @@ main = function() {
   library(ggplot2)
   library(pheatmap)
   # library(ComplexHeatmap) # requries bioconductor...
-  library(uwot)
   library(dbscan)
+  library(dplyr)
 
   show_header("CRISPR Drug Screen MCD UI")
   cat("Welcome. ")
@@ -1368,7 +1358,8 @@ main = function() {
 
   res = run_or_exit(
     run_mcd_pipeline(
-      final_input = final_input
+      final_input = final_input,
+      B=5
       ),
     "MCD Analysis Error"
   )
@@ -1379,18 +1370,18 @@ main = function() {
     create = TRUE
   )
 
-    # save workbook
+  # save workbook
   # make sure run_mcd.R is sourced first!
-  xlsx_file <- save_analysis_outputs(
+  out.list <- save_analysis_outputs(
     final_input = final_input,
     res = res,
     out_dir = out_dir,
+    file_name = 'temo_res.xlsx',
     alpha = 0.05,
-    top_n = 25,
-    include_group_sheets=FALSE
+    top_n = 25
   )
   
-  cat("Saved output to:", xlsx_file, "\n")
+  cat("Saved output to:", out.list$out_file, "\n")
   
   # # save RDS inputs for report
   # save_report_inputs(final_input, res, out_dir = out_dir)
