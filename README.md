@@ -1,6 +1,6 @@
-# mcd_for_crispr (MCD CLI)
-Command line interface to run robust MCD-based analysis on CRISPR drug screens using R. This project provides a simple cli for an interactive R workflow to perform Minimum covariance determinant analysis of large-scale CRISPR knockout screens.
-After cloning or downloading the project folder, run the launcher for your operating system, and interact with the workflow defined in `main.R`.
+# crisprMCD CLI
+Command line interface (CLI) to run robust minimum covariant determinant (MCD) analyses on large-scale CRISPR studies involving multiple CRISPR knockout screens using R. This project provides a simple cli (for any OS) for an interactive R workflow for MCD analysis.
+After cloning or downloading the project folder, run the launcher for your operating system (run.bat for Windows OS Launcher and .sh for MAC/Linus Launcher) to start.
 
 ## Requirements
 
@@ -14,14 +14,13 @@ If R is not installed, please install it first:
 
 ---
 
-## Project Contents
+## Important Project Files
 
 ```text
 main.R        # main interactive R workflow
 run.bat       # Windows launcher
 run.sh        # macOS/Linux launcher
 data/         # example input data
-README.md     # instructions
 ```
 
 ---
@@ -35,9 +34,10 @@ README.md     # instructions
 4. Extract the ZIP file to a location on your computer
 
 ### Option 2: Clone with git
+
 ```bash
-git clone https://github.com/doraaobodo/mcd_for_crispr.git
-cd mcd_for_crispr
+git clone https://github.com/doraaobodo/crisprMCD.git
+cd crisprMCD
 ```
 
 ---
@@ -47,6 +47,10 @@ cd mcd_for_crispr
 ### Windows
 
 1. Open the project folder
+
+```bash
+cd crisprMCD
+```
 2. Double-click `run.bat`
 
 The launcher will:
@@ -96,7 +100,7 @@ Rscript main.R
 
 ## Example Data
 
-An example input file is included in the `data/` folder so users can test the workflow.
+Example input files are included in the `data/` folder so users can test the workflow.
 This is a MAGECK-MLE results file.
 Example:
 
