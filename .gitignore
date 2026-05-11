@@ -49,4 +49,6 @@ po/*~
 rsconnect/
 
 # results folder
-results/
+results/*.xlsx
+results/*.pdf
+results/*.png

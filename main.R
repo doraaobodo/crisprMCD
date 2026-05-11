@@ -134,42 +134,26 @@ choose_input_files = function(
   }
 }
 
-choose_output_dir = function(
-    prompt_text = "Enter full path to output directory: ",
-    caption = "Select output directory",
-    create = TRUE
-) {
-  repeat {
-    selected = NULL
-
-    if (.Platform$OS.type == "windows") {
-      selected = tryCatch(
-        utils::choose.dir(caption = caption),
-        error = function(e) NA_character_
-      )
-    }
-
-    if (!is.null(selected) && !is.na(selected) && nzchar(selected) && dir.exists(selected)) {
-      return(normalizePath(selected, winslash = "/", mustWork = TRUE))
-    }
-
-    cat("Directory chooser unavailable or no folder selected.\n")
-    path = path.expand(read_cli_input(prompt_text))
-
-    if (dir.exists(path)) {
-      return(normalizePath(path, winslash = "/", mustWork = TRUE))
-    }
-
-    if (create && ask_yes_no("Directory does not exist. Create it?", 
-                             default = TRUE)) {
-      ok = dir.create(path, recursive = TRUE, showWarnings = FALSE)
-      if (ok && dir.exists(path)) {
-        return(normalizePath(path, winslash = "/", mustWork = TRUE))
-      }
-    }
-
-    cat("Directory not found or could not be created. Please try again.\n")
+choose_output_dir <- function(dirname = "results", base_dir = getwd(), create = TRUE) {
+  out_dir <- file.path(base_dir, dirname)
+  
+  if (dir.exists(out_dir)) {
+    return(normalizePath(out_dir, winslash = "/", mustWork = TRUE))
   }
+  
+  if (create) {
+    ok <- dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+    
+    if (ok && dir.exists(out_dir)) {
+      return(normalizePath(out_dir, winslash = "/", mustWork = TRUE))
+    }
+  }
+  
+  stop(
+    "Output directory does not exist and could not be created: ",
+    out_dir,
+    call. = FALSE
+  )
 }
 
 collect_input_paths = function() {
@@ -1364,11 +1348,7 @@ main = function() {
     "MCD Analysis Error"
   )
 
-  out_dir = choose_output_dir(
-    prompt_text = "Enter full path to output directory: ",
-    caption = "Select output directory",
-    create = TRUE
-  )
+  out_dir = choose_output_dir()
 
   # save workbook
   # make sure run_mcd.R is sourced first!
@@ -1376,7 +1356,7 @@ main = function() {
     final_input = final_input,
     res = res,
     out_dir = out_dir,
-    file_name = 'temo_res.xlsx',
+    file_name = 'mcd_analysis_results.xlsx',
     alpha = 0.05,
     top_n = 25
   )
