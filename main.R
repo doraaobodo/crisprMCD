@@ -1101,9 +1101,7 @@ save_analysis_outputs <- function(final_input,
  
   out_file <- file.path(out_dir, file_name)
   
-  #-----------------------------
-  # Extract objects safely
-  #-----------------------------
+  # --- Extract objects safely ---
   score_matrix <- final_input$score_matrix
   import_sheet <- final_input$import_sheet
   metadata <- final_input$metadata
@@ -1115,9 +1113,8 @@ save_analysis_outputs <- function(final_input,
   cw_gene <- lapply(res$cw_mcd_results_by_group, `[[`, 2)
   cw_gene = do.call(rbind, cw_gene)
   rownames(cw_gene) = NULL
-  #-----------------------------
-  # Build summary sheet
-  #-----------------------------
+  
+  # --- Build summary sheet ---
   summary_df <- data.frame(
     field = c(
       "input_type",
@@ -1154,9 +1151,7 @@ save_analysis_outputs <- function(final_input,
     stringsAsFactors = FALSE
   )
 
-  #-----------------------------
-  # Convert matrices to data frames for writing
-  #-----------------------------
+  # --- Convert matrices to data frames for writing ---
 
   score_df <- NULL
   if (!is.null(score_matrix)) {
@@ -1170,16 +1165,13 @@ save_analysis_outputs <- function(final_input,
   
   score_cols = as.vector(sapply(res$contrast_matrices, colnames))
   
-  #-----------------------------
-  # Add plotting tables (functions defined in run_mcd.R)
-  #-----------------------------
-  
+  # --- Add plotting tables (functions defined in run_mcd.R) ---
+
   outlier_summary_tbl <- build_outlier_summary_table(res, alpha = 0.05, top_n = 100)
   outlier_summary_tbl = merge(outlier_summary_tbl, cw_gene, by=c('group_id', 'gene'))
-  #-----------------------------
-  # Add DBSCAN Clusters
-  #-----------------------------
-  
+
+  # --- Add DBSCAN Clusters ---
+
   db_res <- run_outlier_hdbscan(
     outlier_summary_tbl = outlier_summary_tbl,
     contrast_cols = score_cols,
@@ -1194,10 +1186,8 @@ save_analysis_outputs <- function(final_input,
   
 
   
-  #-----------------------------
-  # Create results dictionary
-  #-----------------------------
-  
+  # --- Create results dictionary ---
+
   base_dict <- data.frame(
     sheet_name = "mcd_summary",
     column_name = setdiff(colnames(outlier_summary_tbl), score_cols),
@@ -1236,38 +1226,17 @@ save_analysis_outputs <- function(final_input,
   results_dictionary <- rbind(contrast_dict,base_dict)
   
   
-  #-----------------------------
-  # Create workbook
-  #-----------------------------
-  
+  # --- Create workbook ---
+
   wb <- openxlsx::createWorkbook()
   
-  #-----------------------------
-  # Save plotting outputs
-  #-----------------------------
-  
+  # --- Save plotting outputs ---
   
   if (!is.null(import_sheet)) {
     add_sheet_with_data(wb, "import_sheet", as.data.frame(import_sheet, stringsAsFactors = FALSE))
   }
   
-  # 
-  # if (!is.null(outlier_summary_tbl)) {
-  #   add_score_sheet_with_data(wb, "mcd_summary", outlier_summary_tbl, score_cols)
-  # }
-  
-
-  #-----------------------------
   # Raw Outputs
-  #-----------------------------
-  # if (!is.null(score_df)) {
-  #   add_sheet_with_data(wb, "score_matrix", score_df)
-  # }
-  
-  # if (!is.null(mcd_tbl)) {
-  #   add_sheet_with_data(wb, "mcd_results", as.data.frame(mcd_tbl, stringsAsFactors = FALSE))
-  # }
-
   if (!is.null(cw_mcd_tbl)) {
     add_score_sheet_with_data(wb, "main_summary", as.data.frame(cw_mcd_tbl, stringsAsFactors = FALSE),
                               c('X', 'Zres'))
@@ -1277,11 +1246,8 @@ save_analysis_outputs <- function(final_input,
     add_score_sheet_with_data(wb, "mcd_summary", db_res, score_cols)  
   }
   
-  #-----------------------------
-  # Save workbook
-  #-----------------------------
   
-  
+  #  --- Save workbook ---
   
   # Add dictionary FIRST
   add_sheet_with_data(wb, "results_dictionary", results_dictionary)
