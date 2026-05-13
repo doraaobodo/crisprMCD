@@ -8,6 +8,8 @@
 ###############################################################################
 
 source("run_mcd.R")
+source("make_plots.R")
+
 
 check_required_packages = function(pkgs) {
   missing = pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -1304,10 +1306,17 @@ save_analysis_outputs <- function(final_input,
 
 main = function() {
   
-  check_required_packages(c("tools", "utils", "robustbase", 
-                            "cellWise", "fdrtool", "openxlsx",
-                            "ggplot2", "pheatmap", # "ComlpexHeatmap",
-                            "dbscan", "rmarkdown", "dplyr"))
+  utils.pkgs = c("tools", "utils", "robustbase", 
+                 "cellWise", "fdrtool", "openxlsx")
+  
+  viz.pkgs = c("data.table","dplyr","ggplot2", 'ggrepel',
+               "GGally","gridExtra", "circlize",
+               "pheatmap", # "ComlpexHeatmap",
+               "Rtsne","dbscan")
+  
+  
+  check_required_packages(c(utils.pkgs, viz.pkgs))
+  
   library(tools)
   library(utils)
   library(robustbase)
@@ -1317,9 +1326,17 @@ main = function() {
   
   library(ggplot2)
   library(pheatmap)
-  # library(ComplexHeatmap) # requries bioconductor...
   library(dbscan)
   library(dplyr)
+  
+  library(data.table)
+  library(Rtsne)
+  library(GGally)
+  library(gridExtra)
+  library(ggrepel)
+  # library(ComplexHeatmap)
+  library(circlize)
+  
 
   show_header("CRISPR Drug Screen MCD UI")
   cat("Welcome. ")
