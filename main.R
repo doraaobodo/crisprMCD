@@ -159,7 +159,7 @@ choose_input_source_mode = function() {
   }
 }
 
-choose_input_files = function(
+choose_input_files_old = function(
     prompt_text = "Enter full paths separated by commas: ",
     caption = "Select input files"
 ) {
@@ -187,6 +187,129 @@ choose_input_files = function(
     }
 
     cat("One or more files were not found. Please try again.\n")
+  }
+}
+
+choose_input_files <- function(
+    type = c("multiple", "single", "folder", "folders"),
+    prompt_text = "Enter full paths separated by commas: ",
+    caption = "Select input"
+) {
+  type <- match.arg(type)
+  
+  choose_macos_paths <- function(type, caption) {
+    if (Sys.which("osascript") == "") {
+      return(character(0))
+    }
+    
+    script <- switch(
+      type,
+      
+      single = sprintf(
+        'set selectedFile to choose file with prompt %s
+         return POSIX path of selectedFile',
+        shQuote(caption)
+      ),
+      
+      multiple = sprintf(
+        'set selectedFiles to choose file with prompt %s with multiple selections allowed
+         set output to ""
+         repeat with f in selectedFiles
+           set output to output & POSIX path of f & linefeed
+         end repeat
+         return output',
+        shQuote(caption)
+      ),
+      
+      folder = sprintf(
+        'set selectedFolder to choose folder with prompt %s
+         return POSIX path of selectedFolder',
+        shQuote(caption)
+      ),
+      
+      folders = sprintf(
+        'set output to ""
+         repeat
+           try
+             set selectedFolder to choose folder with prompt %s
+             set output to output & POSIX path of selectedFolder & linefeed
+             display dialog "Select another folder?" buttons {"Done", "Select Another"} default button "Done"
+             if button returned of result is "Done" then exit repeat
+           on error
+             exit repeat
+           end try
+         end repeat
+         return output',
+        shQuote(caption)
+      )
+    )
+    
+    tf <- tempfile(fileext = ".applescript")
+    writeLines(script, tf)
+    
+    out <- tryCatch(
+      system2("osascript", tf, stdout = TRUE, stderr = FALSE),
+      error = function(e) character(0),
+      warning = function(w) character(0)
+    )
+    
+    unlink(tf)
+    
+    out <- trimws(out)
+    out <- out[nzchar(out)]
+    
+    if (length(out) == 0) {
+      return(character(0))
+    }
+    
+    path.expand(out)
+  }
+  
+  repeat {
+    selected <- character(0)
+    
+    if (.Platform$OS.type == "windows") {
+      if (type %in% c("single", "multiple")) {
+        selected <- tryCatch(
+          utils::choose.files(
+            caption = caption,
+            multi = type == "multiple"
+          ),
+          error = function(e) character(0)
+        )
+      } else {
+        selected <- tryCatch(
+          utils::choose.dir(caption = caption),
+          error = function(e) character(0)
+        )
+        
+        if (is.na(selected)) {
+          selected <- character(0)
+        }
+      }
+    }
+    
+    if (.Platform$OS.type == "unix") {
+    # if (Sys.info()[["sysname"]] == "Darwin") {
+      selected <- choose_macos_paths(type = type, caption = caption)
+    }
+    
+    if (length(selected) > 0 && all(file.exists(selected))) {
+      return(normalizePath(selected, winslash = "/", mustWork = TRUE))
+    }
+    
+    cat("File chooser unavailable or no valid selection made.\n")
+    
+    ans <- read_cli_input(prompt_text)
+    
+    parts <- trimws(strsplit(ans, ",", fixed = TRUE)[[1]])
+    parts <- path.expand(parts[nzchar(parts)])
+    
+    if (length(parts) > 0 && all(file.exists(parts))) {
+      return(normalizePath(parts, winslash = "/", mustWork = TRUE))
+    }
+    
+    cat("One or more paths were not found. Please try again.\n")
   }
 }
 
@@ -219,6 +342,7 @@ collect_input_paths = function() {
     return(list(
       mode = mode,
       paths = choose_input_files(
+        mode,
         prompt_text = "Enter full path to input file: ",
         caption = "Select input file"
       )
@@ -229,6 +353,7 @@ collect_input_paths = function() {
     return(list(
       mode = mode,
       paths = choose_input_files(
+        mode,
         prompt_text = "Enter full paths to input files, separated by commas: ",
         caption = "Select input files"
       )
