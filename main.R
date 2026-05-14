@@ -11,30 +11,84 @@ source("run_mcd.R")
 source("make_plots.R")
 
 
-check_required_packages = function(pkgs) {
-  missing = pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-
+check_required_packages <- function(
+    pkgs,
+    repos = "https://cloud.r-project.org",
+    lib = NULL,
+    dependencies = TRUE
+) {
+  pkgs <- unique(pkgs)
+  
+  # base packages should not be installed from CRAN
+  base_pkgs <- rownames(installed.packages(priority = "base"))
+  pkgs_to_check <- setdiff(pkgs, base_pkgs)
+  
+  if (is.null(lib)) {
+    lib <- .libPaths()[1]
+  }
+  
+  if (!dir.exists(lib)) {
+    dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+  }
+  
+  if (!file.access(lib, 2) == 0) {
+    user_lib <- file.path(Sys.getenv("HOME"), "R", paste0("library-", getRversion()))
+    dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+    .libPaths(c(user_lib, .libPaths()))
+    lib <- user_lib
+  }
+  
+  missing <- pkgs_to_check[
+    !vapply(pkgs_to_check, requireNamespace, logical(1), quietly = TRUE)
+  ]
+  
   if (length(missing) == 0) {
     return(invisible(TRUE))
   }
-
-  show_header("Missing Required Packages")
+  
+  if (exists("show_header", mode = "function")) {
+    show_header("Missing Required Packages")
+  } else {
+    cat("\nMissing Required Packages\n")
+    cat("-------------------------\n")
+  }
+  
   cat("The following packages are required but not installed:\n")
   for (pkg in missing) cat(" - ", pkg, "\n", sep = "")
-
-  cat("\nInstalling them in R with:\n")
-  cat(sprintf(
-    'install.packages(c(%s))\n',
-    paste(sprintf('"%s"', missing), collapse = ", ")
-  ))
-  cat("\n")
   
-  install.packages(missing)
-
-  # invisible(read_cli_input("Press [Enter] to exit..."))
-  # quit(status = 1)
+  cat("\nInstalling packages into:\n")
+  cat(lib, "\n\n")
+  
+  cat("Using CRAN repo:\n")
+  cat(repos, "\n\n")
+  
+  install.packages(
+    missing,
+    repos = repos,
+    lib = lib,
+    dependencies = dependencies
+  )
+  
+  still_missing <- pkgs_to_check[
+    !vapply(pkgs_to_check, requireNamespace, logical(1), quietly = TRUE)
+  ]
+  
+  if (length(still_missing) > 0) {
+    cat("\nError: Some packages could not be installed:\n")
+    for (pkg in still_missing) cat(" - ", pkg, "\n", sep = "")
+    
+    cat("\nTry installing them manually with:\n")
+    cat(sprintf(
+      'install.packages(c(%s), repos = "%s")\n',
+      paste(sprintf('"%s"', still_missing), collapse = ", "),
+      repos
+    ))
+    
+    stop("Package installation failed.", call. = FALSE)
+  }
+  
+  invisible(TRUE)
 }
-
 ###############################################################################
 # Console and CLI utilities
 ###############################################################################
@@ -1272,36 +1326,28 @@ save_analysis_outputs <- function(final_input,
 
 main = function() {
   
-  utils.pkgs = c("tools", "utils", "robustbase", 
-                 "cellWise", "fdrtool", "openxlsx")
   
-  viz.pkgs = c("data.table","dplyr","ggplot2", 'ggrepel',
-               "GGally","gridExtra", "circlize",
-               "pheatmap", # "ComlpexHeatmap",
-               "Rtsne","dbscan")
+  utils.pkgs <- c(
+    "tools", "utils", "robustbase",
+    "cellWise", "fdrtool", "openxlsx"
+  )
   
+  viz.pkgs <- c(
+    "data.table", "dplyr", "ggplot2", "ggrepel",
+    "GGally", "gridExtra", "circlize",
+    "pheatmap",
+    "Rtsne", "dbscan" # ComplexHeatmap
+  )
   
-  check_required_packages(c(utils.pkgs, viz.pkgs))
+  required_pkgs <- c(utils.pkgs, viz.pkgs)
   
-  library(tools)
-  library(utils)
-  library(robustbase)
-  library(cellWise)
-  library(fdrtool)
-  library(openxlsx)
+  check_required_packages(required_pkgs)
   
-  library(ggplot2)
-  library(pheatmap)
-  library(dbscan)
-  library(dplyr)
-  
-  library(data.table)
-  library(Rtsne)
-  library(GGally)
-  library(gridExtra)
-  library(ggrepel)
-  # library(ComplexHeatmap)
-  library(circlize)
+  for (pkg in required_pkgs) {
+    suppressPackageStartupMessages(
+      library(pkg, character.only = TRUE)
+    )
+  }
   
 
   show_header("CRISPR Drug Screen MCD UI")
