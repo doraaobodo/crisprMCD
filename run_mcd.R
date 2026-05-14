@@ -306,7 +306,6 @@ run_single_mcd <- function(analysis_matrix, B = 25) {
 }
 
 
-library(fdrtool)
 
 grenander =  function(F, type=c("decreasing", "increasing"))  # from fdrtool package
 {
@@ -399,8 +398,6 @@ cwMCD=function(X,alpha=0.75,quant=0.99,
 # helper function applied to each (group_id, gene) subset
 summarize_cmcd_group <- function(df_long) {
 
-  library(dplyr)
-  
   gene_summary <- df_long %>%
     mutate(abs_Z = abs(Zres)) %>%
     group_by(group_id, gene) %>%
