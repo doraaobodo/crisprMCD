@@ -105,12 +105,13 @@ The launcher will:
 - run `main.R`
 - report any errors clearly
 
-** Be Aware **
-
+### Be Aware 
 We use the XQuartz (X11) editor to edit columns of input files. 
 XQuartz (X11) terminal on macOS often fails to render or accept special characters because it defaults to a limited character set.
 To change column header names, type in a cell, copy and paste edit into column header cell. 
 Clip below demonstrates:
+
+
 ---
 
 ### Alternative
