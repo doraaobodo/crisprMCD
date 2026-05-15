@@ -51,4 +51,5 @@ rsconnect/
 # results folder
 # results/*.xlsx
 results/*.pdf
-results/*.png
+results/*.png.DS_Store
+results/*.xlsx
