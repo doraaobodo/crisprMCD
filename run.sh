@@ -182,7 +182,23 @@ echo "$MAIN_R"
 echo "=========================================="
 echo
 
-"$RSCRIPT_EXE" --vanilla "$MAIN_R" "$@"
+# ------------------------------------------
+# UTF-8 locale + native editor
+# ------------------------------------------
+
+
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+
+export EDITOR="/usr/bin/open"
+export R_EDITOR="$EDITOR"
+
+
+# ------------------------------------------
+# Launch
+# ------------------------------------------
+
+"$RSCRIPT_EXE" --vanilla --encoding=UTF-8 "$MAIN_R" "$@"
 EXITCODE=$?
 
 echo

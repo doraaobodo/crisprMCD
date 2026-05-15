@@ -197,6 +197,10 @@ choose_input_files <- function(
 ) {
   type <- match.arg(type)
   
+  escape_applescript_string <- function(x) {
+    paste0('"', gsub('"', '\\"', x), '"')
+  }
+  
   choose_macos_paths <- function(type, caption) {
     if (Sys.which("osascript") == "") {
       return(character(0))
@@ -208,8 +212,8 @@ choose_input_files <- function(
       single = sprintf(
         'set selectedFile to choose file with prompt %s
          return POSIX path of selectedFile',
-        shQuote(caption)
-      ),
+        escape_applescript_string(caption)
+        ),
       
       multiple = sprintf(
         'set selectedFiles to choose file with prompt %s with multiple selections allowed
@@ -218,13 +222,13 @@ choose_input_files <- function(
            set output to output & POSIX path of f & linefeed
          end repeat
          return output',
-        shQuote(caption)
-      ),
+        escape_applescript_string(caption)
+        ),
       
       folder = sprintf(
         'set selectedFolder to choose folder with prompt %s
          return POSIX path of selectedFolder',
-        shQuote(caption)
+        escape_applescript_string(caption)
       ),
       
       folders = sprintf(
@@ -240,7 +244,7 @@ choose_input_files <- function(
            end try
          end repeat
          return output',
-        shQuote(caption)
+        escape_applescript_string(caption)
       )
     )
     
@@ -248,11 +252,17 @@ choose_input_files <- function(
     writeLines(script, tf)
     
     out <- tryCatch(
-      system2("osascript", tf, stdout = TRUE, stderr = FALSE),
-      error = function(e) character(0),
-      warning = function(w) character(0)
-    )
-    
+      system2(
+        "osascript",
+        args = tf,
+        stdout = TRUE,
+        stderr = TRUE
+      ),
+      error = function(e) {
+        message("osascript error: ", e$message)
+        character(0)
+      }
+    )    
     unlink(tf)
     
     out <- trimws(out)
@@ -289,8 +299,8 @@ choose_input_files <- function(
       }
     }
     
-    if (.Platform$OS.type == "unix") {
-    # if (Sys.info()[["sysname"]] == "Darwin") {
+    # if (.Platform$OS.type == "unix") {
+    if (Sys.info()[["sysname"]] == "Darwin") {
       selected <- choose_macos_paths(type = type, caption = caption)
     }
     
@@ -360,12 +370,18 @@ collect_input_paths = function() {
     ))
   }
 
-  dir_path = choose_output_dir(
-    prompt_text = "Enter folder containing input files: ",
-    caption = "Select input folder",
-    create = FALSE
-  )
+  # dir_path = choose_output_dir(
+  #   prompt_text = "Enter folder containing input files: ",
+  #   caption = "Select input folder",
+  #   create = FALSE
+  # )
 
+  dir_path <- choose_input_files(
+    type = "folder",
+    prompt_text = "Enter folder containing input files: ",
+    caption = "Select input folder"
+  )
+  
   files = list.files(dir_path, full.names = TRUE)
   files = files[file.info(files)$isdir %in% FALSE]
 
@@ -612,11 +628,9 @@ edit_import_sheet = function(import_sheet, input_type) {
   if (input_type == "raw_counts") {
     cat(" - role: gene / guide / sample / ignore\n")
   }
-  cat("\n")
-  print(import_sheet)
-  cat("\n")
 
   cat("Opening the import sheet editor... \n")
+  
   edited = utils::edit(import_sheet)
 
   if (is.null(edited)) {
@@ -1451,7 +1465,8 @@ save_analysis_outputs <- function(final_input,
 
 main = function() {
   
-  
+  Sys.setlocale("LC_ALL", "en_US.UTF-8")
+
   utils.pkgs <- c(
     "tools", "utils", "robustbase",
     "cellWise", "fdrtool", "openxlsx"

@@ -70,11 +70,32 @@ run.bat
 
 1. Open a terminal
 2. Navigate to the project folder
+
+```bash
+cd crisprMCD/
+```
 3. Make the launcher executable:
+
 ```bash
 chmod +x run.sh
 ```
-4. Run:
+4. Make sure we can access osascript
+
+Go to:
+
+System Settings -> Privacy & Security -> Automation
+
+and ensure:
+
+* Terminal
+* iTerm
+* R
+* RStudio
+
+have permission to control Finder/System Events.
+
+5. Run:
+
 ```bash
 ./run.sh
 ```
@@ -84,6 +105,12 @@ The launcher will:
 - run `main.R`
 - report any errors clearly
 
+** Be Aware **
+
+We use the XQuartz (X11) editor to edit columns of input files. 
+XQuartz (X11) terminal on macOS often fails to render or accept special characters because it defaults to a limited character set.
+To change column header names, type in a cell, copy and paste edit into column header cell. 
+Clip below demonstrates:
 ---
 
 ### Alternative

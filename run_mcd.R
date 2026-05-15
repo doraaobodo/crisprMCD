@@ -1,4 +1,122 @@
 
+choose_from_list <- function(
+    choices,
+    title = "Choose an option",
+    multiple = FALSE
+) {
+  
+  choices <- as.character(choices)
+  
+  # -------------------------------------------------
+  # macOS native popup
+  # -------------------------------------------------
+  
+  if (Sys.info()[["sysname"]] == "Darwin" &&
+      Sys.which("osascript") != "") {
+    
+    esc <- function(x) {
+      gsub('"', '\\"', x)
+    }
+    
+    applescript_choices <- paste(
+      sprintf('"%s"', esc(choices)),
+      collapse = ", "
+    )
+    
+    script <- sprintf(
+      '
+set theChoice to choose from list {%s} with prompt "%s" %s
+
+if theChoice is false then
+    return ""
+end if
+
+set AppleScript\'s text item delimiters to linefeed
+return theChoice as text
+',
+      applescript_choices,
+      esc(title),
+      if (multiple) "with multiple selections allowed" else ""
+    )
+    
+    tf <- tempfile(fileext = ".applescript")
+    writeLines(script, tf)
+    
+    out <- tryCatch(
+      system2(
+        "osascript",
+        args = tf,
+        stdout = TRUE,
+        stderr = TRUE
+      ),
+      error = function(e) {
+        message("AppleScript error: ", e$message)
+        character(0)
+      }
+    )
+    
+    unlink(tf)
+    
+    out <- trimws(out)
+    out <- out[nzchar(out)]
+    
+    if (length(out) > 0) {
+      
+      if (multiple) {
+        return(trimws(unlist(strsplit(out, "\n"))))
+      }
+      
+      return(out[1])
+    }
+  }
+  
+  # -------------------------------------------------
+  # Interactive GUI fallback
+  # -------------------------------------------------
+  
+  if (interactive()) {
+    
+    out <- utils::select.list(
+      choices = choices,
+      title = title,
+      multiple = multiple,
+      graphics = TRUE
+    )
+    
+    if (length(out) > 0 && all(nzchar(out))) {
+      return(out)
+    }
+  }
+  
+  # -------------------------------------------------
+  # Terminal fallback
+  # -------------------------------------------------
+  
+  cat("\n")
+  cat(title, "\n\n")
+  
+  for (i in seq_along(choices)) {
+    cat(sprintf("  %d) %s\n", i, choices[i]))
+  }
+  
+  cat("\n")
+  
+  repeat {
+    
+    ans <- read_cli_input("Enter selection number: ")
+    
+    idx <- suppressWarnings(as.integer(ans))
+    
+    if (!is.na(idx) &&
+        idx >= 1 &&
+        idx <= length(choices)) {
+      
+      return(choices[idx])
+    }
+    
+    cat("Invalid selection.\n")
+  }
+}
 
 choose_contrast_mode <- function(meta,
                                  treatment_col = "treatment",
@@ -31,10 +149,9 @@ choose_contrast_mode <- function(meta,
     "manual_control"
   )
   
-  mode <- utils::select.list(
+  mode <- choose_from_list(
     choices = choices,
-    title = "Choose contrast mode",
-    multiple = FALSE, graphics = T
+    title = "Choose contrast mode"
   )
   
   if (!nzchar(mode)) {
@@ -42,10 +159,9 @@ choose_contrast_mode <- function(meta,
   }
   
   if (mode == "manual_control") {
-    control_treatment <- utils::select.list(
+    control_treatment <- choose_from_list(
       choices = unique(as.character(meta[[treatment_col]])),
-      title = "Choose the control treatment",
-      multiple = FALSE, graphics = T
+      title = "Choose the control treatment"
     )
     if (!nzchar(control_treatment)) {
       stop("No control treatment selected.")
