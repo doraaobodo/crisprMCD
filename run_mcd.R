@@ -178,6 +178,215 @@ choose_contrast_mode <- function(meta,
   # list(mode = "pairwise", control_treatment = NULL)
 }
 
+assert_unique_key <- function(df, key, df_name = deparse(substitute(df))) {
+  missing_key <- setdiff(key, colnames(df))
+  if (length(missing_key) > 0) {
+    stop(df_name, " is missing key column(s): ",
+         paste(missing_key, collapse = ", "))
+  }
+  
+  key_df <- df[, key, drop = FALSE]
+  key_chr <- do.call(paste, c(key_df, sep = "\r"))
+  
+  bad <- duplicated(key_chr) | duplicated(key_chr, fromLast = TRUE)
+  
+  if (any(bad)) {
+    examples <- unique(key_chr[bad])
+    examples <- head(examples, 10)
+    
+    stop(
+      df_name, " does not have unique key(s): ",
+      paste(key, collapse = ", "),
+      "\nExample duplicated key(s): ",
+      paste(examples, collapse = "; ")
+    )
+  }
+  
+  invisible(TRUE)
+}
+
+
+safe_left_join_base <- function(x, y, by, x_name = "x", y_name = "y") {
+  assert_unique_key(y, by, y_name)
+  
+  n_before <- nrow(x)
+  
+  out <- merge(
+    x,
+    y,
+    by = by,
+    all.x = TRUE,
+    sort = FALSE
+  )
+  
+  if (nrow(out) != n_before) {
+    stop(
+      "Join changed row count from ", n_before, " to ", nrow(out), ".\n",
+      "This indicates a non-unique join key or unintended many-to-many merge.\n",
+      "Join key: ", paste(by, collapse = ", ")
+    )
+  }
+  
+  out
+}
+
+
+# build_group_contrast_matrix <- function(score_matrix,
+#                                         group_meta,
+#                                         mode = c("treatment_vs_control",
+#                                                  "pairwise",
+#                                                  "all_samples_as_is",
+#                                                  "average_treatment_vs_control"),
+#                                         treatment_col = "treatment",
+#                                         treatment_type_col = "treatment_type",
+#                                         sample_col = "sample",
+#                                         control_treatment = NULL
+#                                         ) {
+#   mode <- match.arg(mode)
+#   group_meta <- as.data.frame(group_meta, stringsAsFactors = FALSE)
+#   
+#   required_cols <- c(sample_col, treatment_col)
+#   missing_cols <- setdiff(required_cols, colnames(group_meta))
+#   if (length(missing_cols) > 0) {
+#     stop("group_meta is missing required columns: ",
+#          paste(missing_cols, collapse = ", "))
+#   }
+#   
+#   sample_ids <- as.character(group_meta[[sample_col]])
+#   sample_ids <- sample_ids[sample_ids %in% colnames(score_matrix)]
+#   
+#   if (length(sample_ids) == 0) {
+#     stop("No group samples found in score_matrix.")
+#   }
+#   
+#   submat <- score_matrix[, sample_ids, drop = FALSE]
+#   treatments <- as.character(group_meta[[treatment_col]])
+#   names(treatments) <- as.character(group_meta[[sample_col]])
+#   
+#   if (mode == "all_samples_as_is") {
+#     return(list(
+#       contrast_matrix = submat,
+#       contrast_info = data.frame(
+#         contrast = colnames(submat),
+#         mode = "all_samples_as_is",
+#         stringsAsFactors = FALSE
+#       )
+#     ))
+#   }
+#   
+#   if (mode == "pairwise") {
+#     trt_levels <- unique(treatments)
+#     trt_levels <- trt_levels[!is.na(trt_levels) & nzchar(trimws(trt_levels))]
+#     
+#     if (length(trt_levels) < 2) {
+#       stop("Need at least 2 treatment values for pairwise contrasts.")
+#     }
+#     
+#     pairs <- combn(trt_levels, 2, simplify = FALSE)
+#     
+#     contrast_list <- lapply(pairs, function(p) {
+#       a <- p[1]
+#       b <- p[2]
+#       
+#       a_samples <- names(treatments)[treatments == a]
+#       b_samples <- names(treatments)[treatments == b]
+#       
+#       a_mean <- rowMeans(submat[, a_samples, drop = FALSE], na.rm = TRUE)
+#       b_mean <- rowMeans(submat[, b_samples, drop = FALSE], na.rm = TRUE)
+#       
+#       out <- a_mean - b_mean
+#       out
+#     })
+#     
+#     contrast_names <- vapply(pairs, function(p) {
+#       paste0(p[1], "_vs_", p[2])
+#     }, character(1))
+#     
+#     contrast_matrix <- do.call(cbind, contrast_list)
+#     colnames(contrast_matrix) <- contrast_names
+#     rownames(contrast_matrix) <- rownames(submat)
+#     
+#     return(list(
+#       contrast_matrix = contrast_matrix,
+#       contrast_info = data.frame(
+#         contrast = contrast_names,
+#         mode = "pairwise",
+#         stringsAsFactors = FALSE
+#       )
+#     ))
+#   }
+#   
+#   if (mode %in% c("treatment_vs_control", "average_treatment_vs_control")) {
+#     if (is.null(control_treatment) || !nzchar(control_treatment)) {
+#       if (treatment_type_col %in% colnames(group_meta)) {
+#         tt <- trimws(tolower(as.character(group_meta[[treatment_type_col]])))
+#         controls <- unique(as.character(group_meta[[treatment_col]][tt == "control"]))
+#         controls <- controls[!is.na(controls) & nzchar(trimws(controls))]
+#         if (length(controls) >= 1) {
+#           control_treatment <- controls[1]
+#         }
+#       }
+#     }
+#     
+#     if (is.null(control_treatment) || !nzchar(control_treatment)) {
+#       stop("Could not determine control treatment.")
+#     }
+#     
+#     ctrl_samples <- names(treatments)[treatments == control_treatment]
+#     if (length(ctrl_samples) == 0) {
+#       stop("No samples found for control treatment: ", control_treatment)
+#     }
+#     
+#     other_treatments <- setdiff(unique(treatments), control_treatment)
+#     other_treatments <- other_treatments[!is.na(other_treatments) & nzchar(trimws(other_treatments))]
+#     
+#     if (length(other_treatments) == 0) {
+#       stop("No non-control treatments found in this group.")
+#     }
+#     
+#     
+#     if (mode == "average_treatment_vs_control") {
+#       trt_samples <- names(treatments)[treatments %in% other_treatments]
+#       
+#       ctrl_mean <- rowMeans(submat[, ctrl_samples, drop = FALSE], na.rm = TRUE)
+#       trt_mean <- rowMeans(submat[, trt_samples, drop = FALSE], na.rm = TRUE)
+#       
+#       contrast_matrix <- cbind(treatment_vs_control = trt_mean - ctrl_mean)
+#       rownames(contrast_matrix) <- rownames(submat)
+#       
+#       return(list(
+#         contrast_matrix = contrast_matrix,
+#         contrast_info = data.frame(
+#           contrast = "treatment_vs_control",
+#           treatment = paste(other_treatments, collapse = ";"),
+#           control = control_treatment,
+#           mode = "average_treatment_vs_control",
+#           stringsAsFactors = FALSE
+#         )
+#       ))
+#     }
+#     
+# 
+#     trt_samples <- names(treatments)[treatments %in% other_treatments]
+#     contrast_matrix = submat[, trt_samples, drop = FALSE] - rowMeans(submat[, ctrl_samples, drop = FALSE])
+#     contrast_names <- paste0(trt_samples, "_vs_", ctrl_samples)
+#     colnames(contrast_matrix) <- contrast_names
+#     rownames(contrast_matrix) <- rownames(submat)
+#     
+#     return(list(
+#       contrast_matrix = contrast_matrix,
+#       contrast_info = data.frame(
+#         contrast = contrast_names,
+#         treatment = other_treatments,
+#         control = control_treatment,
+#         mode = "treatment_vs_control",
+#         stringsAsFactors = FALSE
+#       )
+#     ))
+#   }
+#   
+#   stop("Unsupported contrast mode: ", mode)
+# }
 
 build_group_contrast_matrix <- function(score_matrix,
                                         group_meta,
@@ -188,8 +397,8 @@ build_group_contrast_matrix <- function(score_matrix,
                                         treatment_col = "treatment",
                                         treatment_type_col = "treatment_type",
                                         sample_col = "sample",
-                                        control_treatment = NULL
-                                        ) {
+                                        control_treatment = NULL) {
+  
   mode <- match.arg(mode)
   group_meta <- as.data.frame(group_meta, stringsAsFactors = FALSE)
   
@@ -200,22 +409,54 @@ build_group_contrast_matrix <- function(score_matrix,
          paste(missing_cols, collapse = ", "))
   }
   
-  sample_ids <- as.character(group_meta[[sample_col]])
+  if (anyDuplicated(colnames(score_matrix))) {
+    dup_cols <- unique(colnames(score_matrix)[duplicated(colnames(score_matrix))])
+    stop(
+      "score_matrix column names must be unique. Duplicated column names: ",
+      paste(head(dup_cols, 10), collapse = ", ")
+    )
+  }
+  
+  group_meta[[".sample_id"]] <- as.character(group_meta[[sample_col]])
+  
+  if (anyNA(group_meta[[".sample_id"]]) ||
+      any(!nzchar(trimws(group_meta[[".sample_id"]]))) ) {
+    stop("sample_col contains missing or empty sample identifiers.")
+  }
+  
+  if (anyDuplicated(group_meta[[".sample_id"]])) {
+    dup_ids <- unique(group_meta[[".sample_id"]][duplicated(group_meta[[".sample_id"]])])
+    stop(
+      "sample_col must uniquely identify rows in group_meta. ",
+      "Duplicated sample IDs: ",
+      paste(head(dup_ids, 10), collapse = ", ")
+    )
+  }
+  
+  sample_ids <- group_meta[[".sample_id"]]
   sample_ids <- sample_ids[sample_ids %in% colnames(score_matrix)]
   
   if (length(sample_ids) == 0) {
     stop("No group samples found in score_matrix.")
   }
   
+  group_meta_sub <- group_meta[group_meta[[".sample_id"]] %in% sample_ids, , drop = FALSE]
+  group_meta_sub <- group_meta_sub[match(sample_ids, group_meta_sub[[".sample_id"]]), , drop = FALSE]
+  
   submat <- score_matrix[, sample_ids, drop = FALSE]
-  treatments <- as.character(group_meta[[treatment_col]])
-  names(treatments) <- as.character(group_meta[[sample_col]])
+  
+  treatments <- as.character(group_meta_sub[[treatment_col]])
+  names(treatments) <- group_meta_sub[[".sample_id"]]
   
   if (mode == "all_samples_as_is") {
     return(list(
       contrast_matrix = submat,
       contrast_info = data.frame(
+        contrast_id = colnames(submat),
         contrast = colnames(submat),
+        treatment_sample_id = colnames(submat),
+        treatment_sample_ids = colnames(submat),
+        control_sample_ids = NA_character_,
         mode = "all_samples_as_is",
         stringsAsFactors = FALSE
       )
@@ -242,8 +483,7 @@ build_group_contrast_matrix <- function(score_matrix,
       a_mean <- rowMeans(submat[, a_samples, drop = FALSE], na.rm = TRUE)
       b_mean <- rowMeans(submat[, b_samples, drop = FALSE], na.rm = TRUE)
       
-      out <- a_mean - b_mean
-      out
+      a_mean - b_mean
     })
     
     contrast_names <- vapply(pairs, function(p) {
@@ -254,22 +494,36 @@ build_group_contrast_matrix <- function(score_matrix,
     colnames(contrast_matrix) <- contrast_names
     rownames(contrast_matrix) <- rownames(submat)
     
+    contrast_info <- data.frame(
+      contrast_id = contrast_names,
+      contrast = contrast_names,
+      treatment = vapply(pairs, `[`, character(1), 1),
+      control = vapply(pairs, `[`, character(1), 2),
+      treatment_sample_id = NA_character_,
+      treatment_sample_ids = vapply(pairs, function(p) {
+        paste(names(treatments)[treatments == p[1]], collapse = ";")
+      }, character(1)),
+      control_sample_ids = vapply(pairs, function(p) {
+        paste(names(treatments)[treatments == p[2]], collapse = ";")
+      }, character(1)),
+      mode = "pairwise",
+      stringsAsFactors = FALSE
+    )
+    
     return(list(
       contrast_matrix = contrast_matrix,
-      contrast_info = data.frame(
-        contrast = contrast_names,
-        mode = "pairwise",
-        stringsAsFactors = FALSE
-      )
+      contrast_info = contrast_info
     ))
   }
   
   if (mode %in% c("treatment_vs_control", "average_treatment_vs_control")) {
+    
     if (is.null(control_treatment) || !nzchar(control_treatment)) {
-      if (treatment_type_col %in% colnames(group_meta)) {
-        tt <- trimws(tolower(as.character(group_meta[[treatment_type_col]])))
-        controls <- unique(as.character(group_meta[[treatment_col]][tt == "control"]))
+      if (treatment_type_col %in% colnames(group_meta_sub)) {
+        tt <- trimws(tolower(as.character(group_meta_sub[[treatment_type_col]])))
+        controls <- unique(as.character(group_meta_sub[[treatment_col]][tt == "control"]))
         controls <- controls[!is.na(controls) & nzchar(trimws(controls))]
+        
         if (length(controls) >= 1) {
           control_treatment <- controls[1]
         }
@@ -281,17 +535,19 @@ build_group_contrast_matrix <- function(score_matrix,
     }
     
     ctrl_samples <- names(treatments)[treatments == control_treatment]
+    
     if (length(ctrl_samples) == 0) {
       stop("No samples found for control treatment: ", control_treatment)
     }
     
     other_treatments <- setdiff(unique(treatments), control_treatment)
-    other_treatments <- other_treatments[!is.na(other_treatments) & nzchar(trimws(other_treatments))]
+    other_treatments <- other_treatments[
+      !is.na(other_treatments) & nzchar(trimws(other_treatments))
+    ]
     
     if (length(other_treatments) == 0) {
       stop("No non-control treatments found in this group.")
     }
-    
     
     if (mode == "average_treatment_vs_control") {
       trt_samples <- names(treatments)[treatments %in% other_treatments]
@@ -302,34 +558,72 @@ build_group_contrast_matrix <- function(score_matrix,
       contrast_matrix <- cbind(treatment_vs_control = trt_mean - ctrl_mean)
       rownames(contrast_matrix) <- rownames(submat)
       
+      contrast_info <- data.frame(
+        contrast_id = "treatment_vs_control",
+        contrast = "treatment_vs_control",
+        treatment = paste(other_treatments, collapse = ";"),
+        control = control_treatment,
+        treatment_sample_id = NA_character_,
+        treatment_sample_ids = paste(trt_samples, collapse = ";"),
+        control_sample_ids = paste(ctrl_samples, collapse = ";"),
+        mode = "average_treatment_vs_control",
+        stringsAsFactors = FALSE
+      )
+      
       return(list(
         contrast_matrix = contrast_matrix,
-        contrast_info = data.frame(
-          contrast = "treatment_vs_control",
-          treatment = paste(other_treatments, collapse = ";"),
-          control = control_treatment,
-          mode = "average_treatment_vs_control",
-          stringsAsFactors = FALSE
-        )
+        contrast_info = contrast_info
       ))
     }
     
-
     trt_samples <- names(treatments)[treatments %in% other_treatments]
-    contrast_matrix = submat[, trt_samples, drop = FALSE] - rowMeans(submat[, ctrl_samples, drop = FALSE])
-    contrast_names <- paste0(trt_samples, "_vs_", ctrl_samples)
+    
+    ctrl_mean <- rowMeans(submat[, ctrl_samples, drop = FALSE], na.rm = TRUE)
+    
+    contrast_matrix <- sweep(
+      submat[, trt_samples, drop = FALSE],
+      1,
+      ctrl_mean,
+      FUN = "-"
+    )
+    
+    if (length(ctrl_samples) == 1) {
+      
+      contrast_names <- paste0(
+        trt_samples,
+        "_vs_",
+        ctrl_samples
+      )
+      
+    } else {
+      
+      contrast_names <- paste0(
+        trt_samples,
+        "_vs_",
+        control_treatment
+      )
+    }
+    
     colnames(contrast_matrix) <- contrast_names
     rownames(contrast_matrix) <- rownames(submat)
     
+    trt_treatments <- treatments[trt_samples]
+    
+    contrast_info <- data.frame(
+      contrast_id = contrast_names,
+      contrast = contrast_names,
+      treatment_sample_id = trt_samples,
+      treatment_sample_ids = trt_samples,
+      control_sample_ids = paste(ctrl_samples, collapse = ";"),
+      treatment = unname(trt_treatments),
+      control = control_treatment,
+      mode = "treatment_vs_control",
+      stringsAsFactors = FALSE
+    )
+    
     return(list(
       contrast_matrix = contrast_matrix,
-      contrast_info = data.frame(
-        contrast = contrast_names,
-        treatment = other_treatments,
-        control = control_treatment,
-        mode = "treatment_vs_control",
-        stringsAsFactors = FALSE
-      )
+      contrast_info = contrast_info
     ))
   }
   
@@ -631,15 +925,214 @@ summarize_cmcd_group <- function(df_long) {
 
 
 
+# 
+# run_mcd_pipeline <- function(final_input,
+#                              B = 20) {
+#   
+#   if (!(exists("score_matrix", final_input)) |(is.null(final_input$score_matrix))) {
+#     stop("final_input$score_matrix is missing.")
+#   }
+#   
+#   if (!exists("metadata", final_input) | is.null(final_input$metadata)) {
+#     stop("final_input$metadata is missing.")
+#   }
+#   
+#   score_matrix <- as.matrix(final_input$score_matrix)
+#   meta <- as.data.frame(final_input$metadata, stringsAsFactors = FALSE)
+#   
+#   if (!is.numeric(score_matrix)) {
+#     stop("score_matrix must be numeric.")
+#   }
+#   
+#   if (is.null(rownames(score_matrix))) {
+#     if (!is.null(final_input$gene_data) &&
+#         length(final_input$gene_data) == nrow(score_matrix)) {
+#       rownames(score_matrix) <- as.character(final_input$gene_data)
+#     } else {
+#       stop("score_matrix must have rownames or matching gene_data.")
+#     }
+#   }
+#   
+#   group_sep = ","
+#   treatment_col = "treatment"
+#   treatment_type_col = "treatment_type"
+#   sample_col = "sample"
+#   interactive_if_needed = TRUE
+#   contrast_mode = NULL
+#   control_treatment = NULL
+#   
+#   required_meta_cols <- c(sample_col, "Group_By", treatment_col)
+#   missing_meta <- setdiff(required_meta_cols, colnames(meta))
+#   if (length(missing_meta) > 0) {
+#     stop("metadata is missing required columns: ",
+#          paste(missing_meta, collapse = ", "))
+#   }
+#   
+#   meta <- meta[meta[[sample_col]] %in% colnames(score_matrix), , drop = FALSE]
+#   meta <- meta[match(colnames(score_matrix), meta[[sample_col]]), , drop = FALSE]
+#   
+#   if (any(is.na(meta[[sample_col]]))) {
+#     stop("Not all score_matrix columns matched metadata.")
+#   }
+#   
+#   group_entries <- unique(trimws(as.character(meta$Group_By)))
+#   group_entries <- group_entries[!is.na(group_entries) & nzchar(group_entries)]
+#   
+#   if (length(group_entries) == 0 || all(tolower(group_entries) == "none")) {
+#     group_by_cols <- character(0)
+#   } else {
+#     if (length(group_entries) > 1) {
+#       stop("Conflicting Group_By specifications in metadata: ",
+#            paste(group_entries, collapse = ", "))
+#     }
+#     group_by_cols <- trimws(unlist(strsplit(group_entries[1], split = group_sep, fixed = TRUE)))
+#     group_by_cols <- group_by_cols[nzchar(group_by_cols)]
+#     
+#     invalid_group_cols <- setdiff(group_by_cols, colnames(meta))
+#     if (length(invalid_group_cols) > 0) {
+#       stop("Invalid Group_By columns: ",
+#            paste(invalid_group_cols, collapse = ", "))
+#     }
+#   }
+#   
+#   if (length(group_by_cols) == 0) {
+#     group_keys <- rep("all_samples", nrow(meta))
+#   } else {
+#     group_keys <- apply(meta[, group_by_cols, drop = FALSE], 1, function(x) {
+#       paste(paste(group_by_cols, x, sep = "="), collapse = "__")
+#     })
+#   }
+#   
+#   split_idx <- split(seq_len(nrow(meta)), group_keys)
+#   
+#   if (is.null(contrast_mode)) {
+#     contrast_choice <- choose_contrast_mode(
+#       meta = meta,
+#       treatment_col = treatment_col,
+#       treatment_type_col = treatment_type_col
+#     )
+#     contrast_mode <- contrast_choice$mode
+#     control_treatment <- contrast_choice$control_treatment
+#   }
+#   
+#   cat("Using contrast mode: ", contrast_mode, "\n")
+#   if (!is.null(control_treatment) && nzchar(control_treatment)) {
+#     cat("Control treatment: ", control_treatment, "\n\n")
+#   }
+#   cat(" Running ", length(split_idx), " group(s). \n")
+#   
+#   mcd_results_by_group <- vector("list", length(split_idx))
+#   names(mcd_results_by_group) <- names(split_idx)
+#   
+#   cw_mcd_results_by_group <- vector("list", length(split_idx))
+#   names(cw_mcd_results_by_group) <- names(split_idx)
+#   
+#   contrast_matrices <- vector("list", length(split_idx))
+#   names(contrast_matrices) <- names(split_idx)
+#   
+#   contrast_info_by_group <- vector("list", length(split_idx))
+#   names(contrast_info_by_group) <- names(split_idx)
+#   
+#   for (group_name in names(split_idx)) {
+#     
+#     idx <- split_idx[[group_name]]
+#     group_meta <- meta[idx, , drop = FALSE]
+#     group_samples <- as.character(group_meta[[sample_col]])
+#     
+#     cat("Building contrasts for group: ", group_name, "\n")
+#     
+#     built <- build_group_contrast_matrix(
+#       score_matrix = score_matrix,
+#       group_meta = group_meta,
+#       mode = contrast_mode,
+#       treatment_col = treatment_col,
+#       treatment_type_col = treatment_type_col,
+#       sample_col = sample_col,
+#       control_treatment = control_treatment
+#     )
+#     
+#     contrast_matrix <- built$contrast_matrix
+#     contrast_info <- built$contrast_info
+#     
+#     if (ncol(contrast_matrix) < 1) {
+#       stop("Contrast matrix for group '", group_name, "' has no columns.")
+#     }
+#     
+#     contrast_matrices[[group_name]] <- contrast_matrix
+#     contrast_info_by_group[[group_name]] <- contrast_info
+#     
+#     # run mcd
+#     mcd_res <- run_single_mcd(
+#       analysis_matrix = contrast_matrix,
+#       B = B
+#     )
+#     
+#     mcd_res$group_id <- group_name
+#     rownames(mcd_res) <- NULL
+#     mcd_results_by_group[[group_name]] <- mcd_res
+#     
+#     # run cellMCD
+#     cw_mcd_list <- cwMCD(contrast_matrix)
+#     cw_mcd_res <- cw_mcd_list$res.df
+#     
+#     contrast_info$sample <- sub("_vs_.*$", "", contrast_info$contrast)
+#     contrast_meta = merge(contrast_info, group_meta,
+#                           by = c("sample", "treatment"))
+#     cw_mcd_res = merge(cw_mcd_res, contrast_info, by = 'contrast')
+#     cw_mcd_res = merge(cw_mcd_res, group_meta, by = 'treatment')
+#     
+#     
+#     remove.cols = c('control', 'mode', 'sample', 'treatment_type', 'rep',
+#                     'include_sample', 'Group_By', 'original_samples')
+#     
+#     keep.cols = setdiff(colnames(cw_mcd_res), remove.cols)
+#     keep.cols = c(
+#       colnames(cw_mcd_list$res.df), 
+#       setdiff(keep.cols, 
+#               colnames(cw_mcd_list$res.df))
+#     )
+#     
+#     cw_mcd_res=cw_mcd_res[, keep.cols]
+#     cw_mcd_res$group_id <- group_name
+# 
+#     cw_gene_sum = summarize_cmcd_group(cw_mcd_res)
+# 
+#     cw_mcd_results_by_group[[group_name]] <- list(cw_mcd_res, cw_gene_sum,
+#                                                   cw_mcd_list$cw.res.obj)
+#     
+#   }
+#   
+#   mcd_combined_results <- do.call(rbind, mcd_results_by_group)
+#   rownames(mcd_combined_results) <- NULL
+#   
+#   cw_dfs <- lapply(cw_mcd_results_by_group, `[[`, 1)
+#   cw_mcd_combined_results <- do.call(rbind, cw_dfs)
+#   rownames(cw_mcd_combined_results) <- NULL
+#   
+#   list(
+#     group_by = group_by_cols,
+#     contrast_mode = contrast_mode,
+#     control_treatment = control_treatment,
+#     metadata_used = meta,
+#     contrast_matrices = contrast_matrices,
+#     contrast_info_by_group = contrast_info_by_group,
+#     mcd_results_by_group = mcd_results_by_group,
+#     cw_mcd_results_by_group = cw_mcd_results_by_group,
+#     mcd_combined_results = mcd_combined_results,
+#     cw_mcd_combined_results = cw_mcd_combined_results
+#     
+#   )
+# }
+# 
 
 run_mcd_pipeline <- function(final_input,
                              B = 20) {
   
-  if (!(exists("score_matrix", final_input)) |(is.null(final_input$score_matrix))) {
+  if (!(exists("score_matrix", final_input)) || is.null(final_input$score_matrix)) {
     stop("final_input$score_matrix is missing.")
   }
   
-  if (!exists("metadata", final_input) | is.null(final_input$metadata)) {
+  if (!exists("metadata", final_input) || is.null(final_input$metadata)) {
     stop("final_input$metadata is missing.")
   }
   
@@ -659,19 +1152,37 @@ run_mcd_pipeline <- function(final_input,
     }
   }
   
-  group_sep = ","
-  treatment_col = "treatment"
-  treatment_type_col = "treatment_type"
-  sample_col = "sample"
-  interactive_if_needed = TRUE
-  contrast_mode = NULL
-  control_treatment = NULL
+  group_sep <- ","
+  treatment_col <- "treatment"
+  treatment_type_col <- "treatment_type"
+  sample_col <- "sample"
+  interactive_if_needed <- TRUE
+  contrast_mode <- NULL
+  control_treatment <- NULL
   
   required_meta_cols <- c(sample_col, "Group_By", treatment_col)
   missing_meta <- setdiff(required_meta_cols, colnames(meta))
+  
   if (length(missing_meta) > 0) {
     stop("metadata is missing required columns: ",
          paste(missing_meta, collapse = ", "))
+  }
+  
+  if (anyDuplicated(colnames(score_matrix))) {
+    dup_cols <- unique(colnames(score_matrix)[duplicated(colnames(score_matrix))])
+    stop(
+      "score_matrix column names must be unique. Duplicated columns: ",
+      paste(head(dup_cols, 10), collapse = ", ")
+    )
+  }
+  
+  if (anyDuplicated(meta[[sample_col]])) {
+    dup_samples <- unique(meta[[sample_col]][duplicated(meta[[sample_col]])])
+    stop(
+      "metadata sample column must be unique before matching to score_matrix. ",
+      "Duplicated samples: ",
+      paste(head(dup_samples, 10), collapse = ", ")
+    )
   }
   
   meta <- meta[meta[[sample_col]] %in% colnames(score_matrix), , drop = FALSE]
@@ -680,6 +1191,9 @@ run_mcd_pipeline <- function(final_input,
   if (any(is.na(meta[[sample_col]]))) {
     stop("Not all score_matrix columns matched metadata.")
   }
+  
+  meta[[".sample_id"]] <- as.character(meta[[sample_col]])
+  assert_unique_key(meta, ".sample_id", "metadata")
   
   group_entries <- unique(trimws(as.character(meta$Group_By)))
   group_entries <- group_entries[!is.na(group_entries) & nzchar(group_entries)]
@@ -691,7 +1205,13 @@ run_mcd_pipeline <- function(final_input,
       stop("Conflicting Group_By specifications in metadata: ",
            paste(group_entries, collapse = ", "))
     }
-    group_by_cols <- trimws(unlist(strsplit(group_entries[1], split = group_sep, fixed = TRUE)))
+    
+    group_by_cols <- trimws(unlist(strsplit(
+      group_entries[1],
+      split = group_sep,
+      fixed = TRUE
+    )))
+    
     group_by_cols <- group_by_cols[nzchar(group_by_cols)]
     
     invalid_group_cols <- setdiff(group_by_cols, colnames(meta))
@@ -717,14 +1237,17 @@ run_mcd_pipeline <- function(final_input,
       treatment_col = treatment_col,
       treatment_type_col = treatment_type_col
     )
+    
     contrast_mode <- contrast_choice$mode
     control_treatment <- contrast_choice$control_treatment
   }
   
   cat("Using contrast mode: ", contrast_mode, "\n")
+  
   if (!is.null(control_treatment) && nzchar(control_treatment)) {
     cat("Control treatment: ", control_treatment, "\n\n")
   }
+  
   cat(" Running ", length(split_idx), " group(s). \n")
   
   mcd_results_by_group <- vector("list", length(split_idx))
@@ -745,6 +1268,8 @@ run_mcd_pipeline <- function(final_input,
     group_meta <- meta[idx, , drop = FALSE]
     group_samples <- as.character(group_meta[[sample_col]])
     
+    assert_unique_key(group_meta, ".sample_id", "group_meta")
+    
     cat("Building contrasts for group: ", group_name, "\n")
     
     built <- build_group_contrast_matrix(
@@ -764,10 +1289,11 @@ run_mcd_pipeline <- function(final_input,
       stop("Contrast matrix for group '", group_name, "' has no columns.")
     }
     
+    assert_unique_key(contrast_info, "contrast", "contrast_info")
+    
     contrast_matrices[[group_name]] <- contrast_matrix
     contrast_info_by_group[[group_name]] <- contrast_info
     
-    # run mcd
     mcd_res <- run_single_mcd(
       analysis_matrix = contrast_matrix,
       B = B
@@ -777,31 +1303,73 @@ run_mcd_pipeline <- function(final_input,
     rownames(mcd_res) <- NULL
     mcd_results_by_group[[group_name]] <- mcd_res
     
-    # run cellMCD
     cw_mcd_list <- cwMCD(contrast_matrix)
     cw_mcd_res <- cw_mcd_list$res.df
-    cw_mcd_res = merge(cw_mcd_res, contrast_info, by = 'contrast')
-    cw_mcd_res = merge(cw_mcd_res, group_meta, by = 'treatment')
     
-    
-    remove.cols = c('control', 'mode', 'sample', 'treatment_type', 'rep',
-                    'include_sample', 'Group_By', 'original_samples')
-    
-    keep.cols = setdiff(colnames(cw_mcd_res), remove.cols)
-    keep.cols = c(
-      colnames(cw_mcd_list$res.df), 
-      setdiff(keep.cols, 
-              colnames(cw_mcd_list$res.df))
+    cw_mcd_res <- safe_left_join_base(
+      x = cw_mcd_res,
+      y = contrast_info,
+      by = "contrast",
+      x_name = "cw_mcd_res",
+      y_name = "contrast_info"
     )
     
-    cw_mcd_res=cw_mcd_res[, keep.cols]
-    cw_mcd_res$group_id <- group_name
-
-    cw_gene_sum = summarize_cmcd_group(cw_mcd_res)
-
-    cw_mcd_results_by_group[[group_name]] <- list(cw_mcd_res, cw_gene_sum,
-                                                  cw_mcd_list$cw.res.obj)
+    if ("treatment_sample_id" %in% colnames(cw_mcd_res) &&
+        any(!is.na(cw_mcd_res$treatment_sample_id))) {
+      
+      meta_for_join <- group_meta
+      
+      meta_for_join <- meta_for_join[
+        ,
+        setdiff(colnames(meta_for_join), c(treatment_col)),
+        drop = FALSE
+      ]
+      
+      colnames(meta_for_join)[colnames(meta_for_join) == ".sample_id"] <- "treatment_sample_id"
+      
+      cw_mcd_res <- safe_left_join_base(
+        x = cw_mcd_res,
+        y = meta_for_join,
+        by = "treatment_sample_id",
+        x_name = "cw_mcd_res",
+        y_name = "group_meta"
+      )
+      
+      }
     
+    remove.cols <- c(
+      "control",
+      "mode",
+      "sample",
+      "treatment_type",
+      "rep",
+      "include_sample",
+      "Group_By",
+      "original_samples",
+      ".sample_id",
+      "treatment_sample_id",  
+      "contrast_id",          
+      "treatment_sample_ids",
+      "control_sample_ids"
+    )
+    
+    keep.cols <- setdiff(colnames(cw_mcd_res), remove.cols)
+    
+    keep.cols <- c(
+      colnames(cw_mcd_list$res.df),
+      setdiff(keep.cols, colnames(cw_mcd_list$res.df))
+    )
+    
+    cw_mcd_res <- cw_mcd_res[, keep.cols, drop = FALSE]
+    cw_mcd_res$group_id <- group_name
+    
+    cw_gene_sum <- summarize_cmcd_group(cw_mcd_res)
+    
+    cw_mcd_results_by_group[[group_name]] <- list(
+      cw_mcd_res,
+      cw_gene_sum,
+      cw_mcd_list$cw.res.obj
+    )
   }
   
   mcd_combined_results <- do.call(rbind, mcd_results_by_group)
@@ -822,10 +1390,8 @@ run_mcd_pipeline <- function(final_input,
     cw_mcd_results_by_group = cw_mcd_results_by_group,
     mcd_combined_results = mcd_combined_results,
     cw_mcd_combined_results = cw_mcd_combined_results
-    
   )
 }
-
 # ============================================================
 # Make MCD Report Tables (run with main.R: )
 # ============================================================

@@ -1287,27 +1287,193 @@ add_score_sheet_with_data <- function(wb, sheet_name, x, highlight_cols = NULL) 
 save_analysis_outputs <- function(final_input,
                                   res,
                                   out_dir = ".",
-                                  file_name = "mcd_analysis_results.xlsx",
                                   alpha = 0.05,
                                   top_n = 25,
                                   overwrite = TRUE) {
- 
-  out_file <- file.path(out_dir, file_name)
+  
+  if (!dir.exists(out_dir)) {
+    dir.create(out_dir, recursive = TRUE)
+  }
+  
+  # --- Helper: safe file names ---
+  sanitize_file_name <- function(x) {
+    x <- gsub("[^A-Za-z0-9_\\-]+", "_", x)
+    x <- gsub("_+", "_", x)
+    x <- gsub("^_|_$", "", x)
+    paste0(x, ".xlsx")
+  }
+  
+  # --- Helper: safe Excel worksheet names ---
+  sanitize_sheet_name <- function(x) { 
+    x <- substr(x, 1, 31) 
+    gsub("[:\\\\/?*\\[\\]]", "_", x) }  
+  
+  # --- Helper: make duplicate worksheet names unique ---
+  make_unique_sheet_names <- function(x) {
+    x <- vapply(x, sanitize_sheet_name, character(1))
+    
+    out <- character(length(x))
+    seen <- character(0)
+    
+    for (i in seq_along(x)) {
+      base <- x[i]
+      candidate <- base
+      counter <- 1
+      
+      while (candidate %in% seen) {
+        suffix <- paste0("_", counter)
+        candidate <- paste0(substr(base, 1, 31 - nchar(suffix)), suffix)
+        counter <- counter + 1
+      }
+      
+      out[i] <- candidate
+      seen <- c(seen, candidate)
+    }
+    
+    out
+  }
+  
+  # --- Helper: write one table to one workbook ---
+  write_single_output <- function(table_name,
+                                  table_data,
+                                  score_cols = NULL,
+                                  score_patterns = NULL) {
+    
+    if (is.null(table_data)) {
+      return(NULL)
+    }
+    
+    table_data <- as.data.frame(table_data, stringsAsFactors = FALSE)
+    
+    out_file <- file.path(out_dir, sanitize_file_name(table_name))
+    
+    wb <- openxlsx::createWorkbook()
+    sheet_name <- sanitize_sheet_name(table_name)
+    
+    if (!is.null(score_cols) || !is.null(score_patterns)) {
+      score_targets <- if (!is.null(score_cols)) score_cols else score_patterns
+      
+      add_score_sheet_with_data(
+        wb,
+        sheet_name,
+        table_data,
+        score_targets
+      )
+    } else {
+      add_sheet_with_data(
+        wb,
+        sheet_name,
+        table_data
+      )
+    }
+    
+    openxlsx::saveWorkbook(
+      wb,
+      out_file,
+      overwrite = overwrite
+    )
+    
+    out_file
+  }
+  
+  # --- Helper: write one workbook split by group_id ---
+  write_grouped_output <- function(table_name,
+                                   table_data,
+                                   group_col = "group_id",
+                                   score_cols = NULL,
+                                   score_patterns = NULL) {
+    
+    if (is.null(table_data)) {
+      return(NULL)
+    }
+    
+    table_data <- as.data.frame(table_data, stringsAsFactors = FALSE)
+    
+    out_file <- file.path(out_dir, sanitize_file_name(table_name))
+    
+    wb <- openxlsx::createWorkbook()
+    
+    score_targets <- NULL
+    if (!is.null(score_cols) || !is.null(score_patterns)) {
+      score_targets <- if (!is.null(score_cols)) score_cols else score_patterns
+    }
+    
+    if (!group_col %in% colnames(table_data)) {
+      
+      sheet_name <- sanitize_sheet_name(table_name)
+      
+      if (!is.null(score_targets)) {
+        add_score_sheet_with_data(
+          wb,
+          sheet_name,
+          table_data,
+          score_targets
+        )
+      } else {
+        add_sheet_with_data(
+          wb,
+          sheet_name,
+          table_data
+        )
+      }
+      
+    } else {
+      
+      group_values <- unique(table_data[[group_col]])
+      sheet_names <- make_unique_sheet_names(group_values)
+      
+      for (i in seq_along(group_values)) {
+        group_value <- group_values[i]
+        sheet_name <- sheet_names[i]
+        
+        if (is.na(group_value)) {
+          group_tbl <- table_data[is.na(table_data[[group_col]]), , drop = FALSE]
+        } else {
+          group_tbl <- table_data[table_data[[group_col]] == group_value, , drop = FALSE]
+        }
+        
+        if (!is.null(score_targets)) {
+          add_score_sheet_with_data(
+            wb,
+            sheet_name,
+            group_tbl,
+            score_targets
+          )
+        } else {
+          add_sheet_with_data(
+            wb,
+            sheet_name,
+            group_tbl
+          )
+        }
+      }
+    }
+    
+    openxlsx::saveWorkbook(
+      wb,
+      out_file,
+      overwrite = overwrite
+    )
+    
+    out_file
+  }
   
   # --- Extract objects safely ---
   score_matrix <- final_input$score_matrix
   import_sheet <- final_input$import_sheet
-  metadata <- final_input$metadata
   preprocessing <- final_input$preprocessing
-  source_info <- final_input$source_info
   
   mcd_tbl <- res$mcd_combined_results
   cw_mcd_tbl <- res$cw_mcd_combined_results
-  cw_gene <- lapply(res$cw_mcd_results_by_group, `[[`, 2)
-  cw_gene = do.call(rbind, cw_gene)
-  rownames(cw_gene) = NULL
   
-  # --- Build summary sheet ---
+  cw_gene <- NULL
+  if (!is.null(res$cw_mcd_results_by_group)) {
+    cw_gene <- lapply(res$cw_mcd_results_by_group, `[[`, 2)
+    cw_gene <- do.call(rbind, cw_gene)
+    rownames(cw_gene) <- NULL
+  }
+  
+  # --- Build summary table ---
   summary_df <- data.frame(
     field = c(
       "input_type",
@@ -1343,9 +1509,8 @@ save_analysis_outputs <- function(final_input,
     ),
     stringsAsFactors = FALSE
   )
-
-  # --- Convert matrices to data frames for writing ---
-
+  
+  # --- Convert score matrix to data frame ---
   score_df <- NULL
   if (!is.null(score_matrix)) {
     score_df <- data.frame(
@@ -1356,106 +1521,158 @@ save_analysis_outputs <- function(final_input,
     )
   }
   
-  score_cols = as.vector(sapply(res$contrast_matrices, colnames))
+  # --- Score columns ---
+  score_cols <- unique(as.vector(
+    unlist(lapply(res$contrast_matrices, colnames), use.names = FALSE)
+  ))
   
-  # --- Add plotting tables (functions defined in run_mcd.R) ---
-
-  outlier_summary_tbl <- build_outlier_summary_table(res, alpha = 0.05, top_n = 100)
-  outlier_summary_tbl = merge(outlier_summary_tbl, cw_gene, by=c('group_id', 'gene'))
-
-  # --- Add DBSCAN Clusters ---
-
-  db_res <- run_outlier_hdbscan(
-    outlier_summary_tbl = outlier_summary_tbl,
-    contrast_cols = score_cols,
-    alpha = 0.05,
-    minPts = 10
+  # --- Build gene-level summary table ---
+  outlier_summary_tbl <- build_outlier_summary_table(
+    res,
+    alpha = alpha,
+    top_n = top_n
   )
   
+  if (!is.null(cw_gene)) {
+    outlier_summary_tbl <- merge(
+      outlier_summary_tbl,
+      cw_gene,
+      by = c("group_id", "gene")
+    )
+  }
   
-  cw_mcd_tbl = merge(cw_mcd_tbl, 
-                     db_res[, setdiff(colnames(db_res), score_cols)], 
-                     by = c('gene', 'group_id'))
+  # # --- DBSCAN clusters ---
+  # db_res <- run_outlier_hdbscan(
+  #   outlier_summary_tbl = outlier_summary_tbl,
+  #   contrast_cols = score_cols,
+  #   alpha = alpha,
+  #   minPts = 10
+  # )
+  # 
+  # if (!is.null(cw_mcd_tbl) && !is.null(db_res)) {
+  #   cw_mcd_tbl <- merge(
+  #     cw_mcd_tbl,
+  #     db_res[, setdiff(colnames(db_res), score_cols), drop = FALSE],
+  #     by = c("gene", "group_id")
+  #   )
+  # }
   
-
+  if (!is.null(cw_mcd_tbl) && !is.null(outlier_summary_tbl)) {
+    cw_mcd_tbl <- merge(
+      cw_mcd_tbl,
+      outlier_summary_tbl[, setdiff(colnames(outlier_summary_tbl), score_cols), drop = FALSE],
+      by = c("gene", "group_id")
+    )
+  }
   
-  # --- Create results dictionary ---
-
+  
+  # --- Results dictionary ---
+  base_descriptions <- c(
+    group_id = "Group Id as defined in input sheet. Analysis was run separately per group id.",
+    gene = "Gene symbol.",
+    mahalanobis_distance = "Mahalanobis distance summarizing multivariate deviation from center across contrasts within the group. Larger distances indicate more extreme outliers.",
+    md_rank = "Rank of the Mahalanobis distance within the group. Smaller ranks indicate more extreme outliers.",
+    p_value = "P-value associated with the Mahalanobis distance.",
+    is_outlier = "Logical indicator of whether the gene was flagged as an outlier in the group.",
+    n_flagged = "Number of samples flagged as extreme in the cell-wise analysis.",
+    prop_flagged = "Proportion of samples flagged as extreme in the cell-wise analysis.",
+    global_score = "Global score = proportion flagged * mean of the absolute Z residual of flagged samples. Higher values indicate many flagged samples that are also extreme.",
+    local_score = "Local score = 1 - proportion flagged * maximum absolute Z residual. Higher values indicate fewer flagged samples with at least one very extreme sample.",
+    p_global = "Global score / (global_score + local_score). Higher values indicate evidence leaning toward widespread outlyingness.",
+    pattern = "Classifies genes based on p_global. Global if the proportion of global to local scores is > 0.6.",
+    sign_col = "Dominant effect sign among contrasts. Computed as (# positive contrasts / N) - (# negative contrasts / N).",
+    sign_class = "Interpretation of sign_col: Positive if sign_col > 0.5, Negative if sign_col < -0.5, otherwise Mixed."
+  )
+  
+  non_score_cols <- setdiff(colnames(outlier_summary_tbl), score_cols)
+  
   base_dict <- data.frame(
-    sheet_name = "mcd_summary",
-    column_name = setdiff(colnames(outlier_summary_tbl), score_cols),
-    description = c(
-      "Group Id as defined in input sheet. Analysis was run separately per group id",
-      "Gene symbol.",
-      "Mahalanobis distance summarizing multivariate deviation from center across contrasts within the group. \n Larger distance indicate more extreme outliers.",
-      "Rank of the Mahalanobis distance within the group. Smaller ranks indicating more extreme outliers.",
-      "P-value associated with the Mahalanobis distance.",
-      "Logical indicator of whether the gene was flagged as an outlier in the group.",
-      # "Standard deviation of absolute contrast effects. Smaller values indicate small variation among contrasts",
-      # "Interpretation of effect_indication: 'Specific' if effect_indication > 0.5, otherwise 'Global.'",
-      "Number of samples flagged as extreme in the cell-wise analysis.",
-      "Proportion of samples flagged as extreme in the cell-wise analysis",
-      "Global score = proportion flagged * mean of the absolute Z residual of flagged samples. Global score is is high when many samples are flagged and flagged samples are extreme",
-      "Local score = 1-proportion flagged * maximum absolute Z residual. Local Score is high when only a few samples are flagged but at least one is very extreme",
-      "P_global = global_score/ (global_score + local_score). P_global is evidence leaning toward widespread outlyingness.",
-      "Pattern classifies genes based on p_global. Pattern is global if the the proportion of global to local scores >0.6, meaning that samples indicate a more global pattern of effects within flagged cells.",
-      "Dominant effect sign (positive or negative) amongst contrasts. Computed as (# positive contrasts / N) - (# negative contrasts / N).",
-      "Interpretation of dominant_sign: Positive if sign_col > 0.5, Negative if sign_col < -0.5, otherwise Mixed.",
-      "Dominant effect sign (positive or negative) amongst contrasts. Computed as (# positive contrasts / N) - (# negative contrasts / N).",
-      "Interpretation of dominant_sign: Positive if sign_col > 0.5, Negative if sign_col < -0.5, otherwise Mixed.",
-      NA,NA,NA,NA,NA, NA,NA,NA, NA
-      
+    sheet_name = "gene_summary",
+    column_name = non_score_cols,
+    description = unname(base_descriptions[non_score_cols]),
+    stringsAsFactors = FALSE
+  )
+  
+  base_dict$description[is.na(base_dict$description)] <- NA_character_
+  
+  contrast_dict <- data.frame(
+    sheet_name = "gene_summary",
+    column_name = score_cols,
+    description = paste(
+      "Contrast value for",
+      score_cols,
+      "\nRed (+) indicates resistant effect; Blue (-) indicates sensitivity effect."
     ),
     stringsAsFactors = FALSE
   )
   
-  contrast_dict <- data.frame(
-    sheet_name = "mcd_summary",
-    column_name = score_cols,
-    description = paste("Contrast value for", score_cols, " \nRed (+) indicates resistant effect; Blue (-) indicates sensitivity effect."),
-    stringsAsFactors = FALSE
+  results_dictionary <- rbind(contrast_dict, base_dict)
+  
+  # --- Create full named output list for exporting ---
+  out.list <- list(
+    results_dictionary = results_dictionary,
+    run_summary = summary_df,
+    import_sheet = if (!is.null(import_sheet)) {
+      as.data.frame(import_sheet, stringsAsFactors = FALSE)
+    } else {
+      NULL
+    },
+    score_matrix = score_df,
+    main_summary = if (!is.null(cw_mcd_tbl)) {
+      as.data.frame(cw_mcd_tbl, stringsAsFactors = FALSE)
+    } else {
+      NULL
+    },
+    gene_summary = if (!is.null(outlier_summary_tbl)) {
+      as.data.frame(outlier_summary_tbl, stringsAsFactors = FALSE)
+    } else {
+      NULL
+    }
   )
   
-  results_dictionary <- rbind(contrast_dict,base_dict)
+  # Remove NULL outputs
+  out.list <- out.list[!vapply(out.list, is.null, logical(1))]
   
+  # --- Write all output tables to .xlsx files ---
+  out_files <- list()
   
-  # --- Create workbook ---
-
-  wb <- openxlsx::createWorkbook()
-  
-  # --- Save plotting outputs ---
-  
-  if (!is.null(import_sheet)) {
-    add_sheet_with_data(wb, "import_sheet", as.data.frame(import_sheet, stringsAsFactors = FALSE))
+  for (nm in names(out.list)) {
+    
+    if (nm == "gene_summary") {
+      
+      out_files[[nm]] <- write_grouped_output(
+        table_name = nm,
+        table_data = out.list[[nm]],
+        group_col = "group_id",
+        score_cols = score_cols
+      )
+      
+    } else if (nm == "main_summary") {
+      
+      out_files[[nm]] <- write_grouped_output(
+        table_name = nm,
+        table_data = out.list[[nm]],
+        group_col = "group_id",
+        score_patterns = c("X", "Zres")
+      )
+      
+    } else {
+      
+      out_files[[nm]] <- write_single_output(
+        table_name = nm,
+        table_data = out.list[[nm]]
+      )
+    }
   }
   
-  # Raw Outputs
-  if (!is.null(cw_mcd_tbl)) {
-    add_score_sheet_with_data(wb, "main_summary", as.data.frame(cw_mcd_tbl, stringsAsFactors = FALSE),
-                              c('X', 'Zres'))
-  }
-
-  if (!is.null(db_res)) {
-    add_score_sheet_with_data(wb, "mcd_summary", db_res, score_cols)  
-  }
+  # --- Return only main_summary and gene_summary ---
+  return.list <- out.list[c("main_summary", "gene_summary")]
+  return.list <- return.list[!vapply(return.list, is.null, logical(1))]
   
+  attr(return.list, "out_files") <- out_files
   
-  #  --- Save workbook ---
-  
-  # Add dictionary FIRST
-  add_sheet_with_data(wb, "results_dictionary", results_dictionary)
-  
-  add_sheet_with_data(wb, "run_summary", summary_df)
-  
-  openxlsx::saveWorkbook(wb, out_file, overwrite = overwrite)
-  
-  invisible(out_file)
-  
-  list('out_file'    = out_file, 
-        'gene_summary' = db_res,
-       'main_summary' = cw_mcd_tbl)
+  return(return.list)
 }
-
 ###############################################################################
 # Main workflow
 ###############################################################################
@@ -1525,16 +1742,19 @@ main = function() {
     final_input = final_input,
     res = res,
     out_dir = out_dir,
-    file_name = 'mcd_analysis_results.xlsx',
     alpha = 0.05,
     top_n = 25
   )
   
   cat("Saved output to:", out.list$out_file, "\n")
   
+  ## make plots
+  run_or_exit(
+    make_plot_pipeline(out.list, out_dir),
+    "Make Plot Pipeline Error"
+  )
+  
   # # save RDS inputs for report
-  # save_report_inputs(final_input, res, out_dir = out_dir)
-  # 
   # # write Rmd
   # write_mcd_report_rmd(
   #   file = file.path(out_dir, "mcd_report.Rmd"),

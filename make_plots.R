@@ -1011,6 +1011,25 @@ transform_for_plot <- function(
 }
 
 
+panel_scatter_flag_labels <- function(x, y, flag, labels = NULL, label_mask = NULL,
+                                      pch = 16, cex = 0.5,
+                                      col_false = "grey70", col_true = "red",
+                                      text_cex = 0.55) {
+  cols <- ifelse(flag, col_true, col_false)
+  cols <- grDevices::adjustcolor(cols, alpha.f = 0.6)
+  points(x, y, col = cols, pch = pch, cex = cex)
+  
+  if (!is.null(labels) && !is.null(label_mask) && any(label_mask)) {
+    text(
+      x = x[label_mask],
+      y = y[label_mask],
+      labels = labels[label_mask],
+      cex = text_cex,
+      pos = 3,
+      offset = 0.3
+    )
+  }
+}
 
 
 plot_pairs <- function(
@@ -1123,6 +1142,7 @@ plot_pairs <- function(
   if (is.null(main_title)) {
     main_title <- paste("Pairs:", group_name, "|", value_col)
   }
+  
   
   # --- Panel function ---
   panel_fun <- function(x, y, ...) {
@@ -1375,7 +1395,7 @@ for (grp in group_pairs) {
   # heatmap of top max 100 genes per group and class
   for (g in grp) {
     res <- make_class_heatmap(
-      tout = touttout[group_id == g,],
+      tout = tout[group_id == g,],
       group_name = g,
       value_col = "Zres",
       top_n_genes = 100,
@@ -1408,7 +1428,6 @@ for (grp in group_pairs) {
 # 3. Close the device
 dev.off()
 
-print(res$counts_table)
 
 cluster_tbl <- data.table::rbindlist(
   lapply(gclusts, function(group_res) {
@@ -1419,32 +1438,6 @@ cluster_tbl <- data.table::rbindlist(
   }),
   fill = TRUE
 )
-
-
-
-
-# save_embedding_comparison_pdf(
-#   filename = file.path(out_dir, "embeddings_tsne_umap_interesting_only.pdf"),
-#   dt = tout,
-#   annot_dt = gene_annot,
-#   value_col = "X",
-#   keep_mode = "interesting_only",
-#   include_summary = TRUE,
-#   label_top_genes = TRUE,
-#   top_n_genes = 30,
-#   gene_rank_col = "mahalanobis",
-#   include_cluster_plots = TRUE,
-#   cluster_col = "hdbscan_cluster"
-#   )
-# 
-# save_pairs_pdf(
-#   filename = file.path(out_dir, "pairs.pdf"),
-#   dt = tout,
-#   value_col = "X",
-#   label_top_genes = TRUE,
-#   top_n_genes = 20,
-#   gene_rank_col = "mahalanobis"
-# )
 
 }
 
