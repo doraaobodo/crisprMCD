@@ -7,19 +7,21 @@
 # Dependencies and setup
 ###############################################################################
 
-source("run_mcd.R")
-source("make_plots.R")
+source("code/run_mcd.R")
+source("code/make_plots.R")
+source("code/make_report.R")
 
 
 check_required_packages <- function(
     pkgs,
+    bioc_pkgs = character(0),
     repos = "https://cloud.r-project.org",
     lib = NULL,
     dependencies = TRUE
 ) {
   pkgs <- unique(pkgs)
+  bioc_pkgs <- unique(bioc_pkgs)
   
-  # base packages should not be installed from CRAN
   base_pkgs <- rownames(installed.packages(priority = "base"))
   pkgs_to_check <- setdiff(pkgs, base_pkgs)
   
@@ -31,7 +33,7 @@ check_required_packages <- function(
     dir.create(lib, recursive = TRUE, showWarnings = FALSE)
   }
   
-  if (!file.access(lib, 2) == 0) {
+  if (file.access(lib, 2) != 0) {
     user_lib <- file.path(Sys.getenv("HOME"), "R", paste0("library-", getRversion()))
     dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
     .libPaths(c(user_lib, .libPaths()))
@@ -42,7 +44,7 @@ check_required_packages <- function(
     !vapply(pkgs_to_check, requireNamespace, logical(1), quietly = TRUE)
   ]
   
-  if (length(missing) == 0) {
+  if (length(missing) == 0L) {
     return(invisible(TRUE))
   }
   
@@ -56,39 +58,55 @@ check_required_packages <- function(
   cat("The following packages are required but not installed:\n")
   for (pkg in missing) cat(" - ", pkg, "\n", sep = "")
   
-  cat("\nInstalling packages into:\n")
-  cat(lib, "\n\n")
+  cran_missing <- setdiff(missing, bioc_pkgs)
+  bioc_missing <- intersect(missing, bioc_pkgs)
   
-  cat("Using CRAN repo:\n")
-  cat(repos, "\n\n")
+  if (length(cran_missing) > 0L) {
+    cat("\nInstalling CRAN packages into:\n")
+    cat(lib, "\n\n")
+    
+    install.packages(
+      cran_missing,
+      repos = repos,
+      lib = lib,
+      dependencies = dependencies
+    )
+  }
   
-  install.packages(
-    missing,
-    repos = repos,
-    lib = lib,
-    dependencies = dependencies
-  )
+  if (length(bioc_missing) > 0L) {
+    if (!requireNamespace("BiocManager", quietly = TRUE)) {
+      install.packages(
+        "BiocManager",
+        repos = repos,
+        lib = lib
+      )
+    }
+    
+    cat("\nInstalling Bioconductor packages into:\n")
+    cat(lib, "\n\n")
+    
+    BiocManager::install(
+      bioc_missing,
+      lib = lib,
+      ask = FALSE,
+      update = FALSE
+    )
+  }
   
   still_missing <- pkgs_to_check[
     !vapply(pkgs_to_check, requireNamespace, logical(1), quietly = TRUE)
   ]
   
-  if (length(still_missing) > 0) {
+  if (length(still_missing) > 0L) {
     cat("\nError: Some packages could not be installed:\n")
     for (pkg in still_missing) cat(" - ", pkg, "\n", sep = "")
-    
-    cat("\nTry installing them manually with:\n")
-    cat(sprintf(
-      'install.packages(c(%s), repos = "%s")\n',
-      paste(sprintf('"%s"', still_missing), collapse = ", "),
-      repos
-    ))
     
     stop("Package installation failed.", call. = FALSE)
   }
   
   invisible(TRUE)
 }
+
 ###############################################################################
 # Console and CLI utilities
 ###############################################################################
@@ -1692,13 +1710,22 @@ main = function() {
   viz.pkgs <- c(
     "data.table", "dplyr", "ggplot2", "ggrepel",
     "GGally", "gridExtra", "circlize",
-    "pheatmap",
-    "Rtsne", "dbscan" # ComplexHeatmap
+    "pheatmap", "cluster",
+    "Rtsne", "dbscan", "ComplexHeatmap"
   )
   
-  required_pkgs <- c(utils.pkgs, viz.pkgs)
+  report.pkgs <- c(
+    "rmarkdown","knitr"
+  )
   
-  check_required_packages(required_pkgs)
+  bioc.pkgs <- c("ComplexHeatmap")
+  
+  required_pkgs <- c(utils.pkgs, viz.pkgs, report.pkgs)
+  
+  check_required_packages(
+    pkgs = required_pkgs,
+    bioc_pkgs = bioc.pkgs
+  )
   
   for (pkg in required_pkgs) {
     suppressPackageStartupMessages(
@@ -1706,7 +1733,6 @@ main = function() {
     )
   }
   
-
   show_header("CRISPR Drug Screen MCD UI")
   cat("Welcome. ")
   cat("This tool will guide you through loading screen data,\n")
@@ -1749,18 +1775,36 @@ main = function() {
   cat("Saved output to:", out.list$out_file, "\n")
   
   ## make plots
-  run_or_exit(
-    make_plot_pipeline(out.list, out_dir),
+  plot.tables <- run_or_exit(
+    make_plot_pipeline(
+      out.list = out.list,
+      mcd_res = res$cw_mcd_results_by_group,
+      out_dir = out_dir,
+      ssZ_quantile = NULL,   # or NULL
+      x_summary = "eff_n",   # or "p_global"
+      hclust_k = NULL
+    ),
     "Make Plot Pipeline Error"
   )
   
   # # save RDS inputs for report
   # # write Rmd
-  # write_mcd_report_rmd(
-  #   file = file.path(out_dir, "mcd_report.Rmd"),
-  #   title = "MCD Analysis Report"
-  # )
+  run_or_exit(
+    make_analysis_report(
+      gout = plot.tables$gout,
+      tout = plot.tables$tout,
+      out_dir = out_dir,
+      params = list(
+      ssZ_quantile = NULL,
+      x_summary = 'eff_n',
+      hclust_k = NULL,
+      sign_cutoff = 0.25
+    )
+  ),
+  "Make Analysis Report Error"
+  )
   
+
 }
 
-main()
+# main()
