@@ -137,12 +137,18 @@ This is a MAGECK-MLE results file.
 Example:
 
 ```text
-data/xiao_2018_mle.csv
+data/PANC1_reads.txt
 ```
 
-Use this file and specify MLE when prompted by the application.
+Use this file when prompted by the application.
 
 ---
+
+## Results
+
+After running, the program automatically adds files to a `results` sub-folder.
+Open the `analysis_report.html` file in a browser to learn how to interpret results. 
+
 
 ## Notes
 
