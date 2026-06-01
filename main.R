@@ -1807,4 +1807,4 @@ main = function() {
 
 }
 
-# main()
+main()
